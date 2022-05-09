@@ -24,8 +24,6 @@ It should be fairly straight forward:
 
 5. Aaand you're done
 
-Also, you can specify
-
 ## License
 
 MIT
