@@ -1,7 +1,7 @@
 {
   "name": "@westh/noon-cph-slack-bot",
-  "description": "Gets the menu of the from Noon CPH and posts it in Slack",
-  "version": "0.0.0",
+  "description": "Gets today's menu from Noon CPH and posts it in Slack",
+  "version": "0.0.1",
   "main": "main.js",
   "repository": {
     "type": "git",
