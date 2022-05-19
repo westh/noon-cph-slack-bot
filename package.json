@@ -15,11 +15,11 @@
   },
   "dependencies": {
     "axios": "^0.27.2",
+    "cheerio": "^1.0.0-rc.10",
     "dotenv": "^16.0.0",
     "form-data": "^4.0.0",
     "i18n-week-days": "^0.0.3",
     "pdf-image": "^2.0.0",
-    "pdf-lib": "^1.17.1",
-    "puppeteer": "^13.7.0"
+    "pdf-lib": "^1.17.1"
   }
 }

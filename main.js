@@ -1,10 +1,10 @@
 require('dotenv').config()
-const puppeteer = require('puppeteer')
 const weekDays = require('i18n-week-days')
 const axios = require('axios')
 const FormData = require('form-data')
 const { PDFDocument } = require('pdf-lib')
 const { PDFImage } = require('pdf-image')
+const cheerio = require('cheerio')
 const fs = require('fs')
 
 const SLACK_FILE_UPLOAD_URL = 'https://slack.com/api/files.upload'
@@ -41,11 +41,9 @@ async function getLunchLink (date) {
   const danishWeekDay = getDanishWeekDay(date)
   const weekNumberMatcher = `_U${weekNumber}`
   
-  const browser = await puppeteer.launch({ headless: true })
-  const page = await browser.newPage()
-  await page.goto(NOON_CPH_MENU_LINK)
-  
-  const linkCollection = await page.$$eval('a', links => links.map(link => link.href))
+  const { data } = await axios.get(NOON_CPH_MENU_LINK)
+  const $ = cheerio.load(data)
+  const linkCollection = $('a').map((_, linkElement) => $(linkElement).attr('href')).get()
   const [lunchLink] = linkCollection.filter(link => link.includes(weekNumberMatcher) && link.includes(danishWeekDay))
 
   return lunchLink
@@ -101,7 +99,7 @@ async function convertPdfToPng (fileName) {
 async function main () {
   const today = new Date()
 
-  log('🏁 starting browser...')
+  log('🏁 getting lunch link...')
   const lunchLink = await getLunchLink(today)
 
   log('⬇️ getting pdf file from link...')
