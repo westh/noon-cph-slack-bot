@@ -4,10 +4,15 @@ const weekDays = require('i18n-week-days')
 const axios = require('axios')
 const FormData = require('form-data')
 const { PDFDocument } = require('pdf-lib')
+const { PDFImage } = require('pdf-image')
 const fs = require('fs')
 
 const SLACK_FILE_UPLOAD_URL = 'https://slack.com/api/files.upload'
 const NOON_CPH_MENU_LINK = 'https://www.nooncph.dk/ugens-menuer'
+
+function log (message) {
+  console.log(`[${new Date().toISOString()}] ${message}`)
+}
 
 function getPageNumber (date) {
   const weekDayInHumanFormat = date.toLocaleString('en-us', {  weekday: 'long' }).toLowerCase()
@@ -79,28 +84,49 @@ async function uploadFileToSlack (fileName) {
   )
 }
 
+async function convertPdfToPng (fileName) {
+  const pdfImage = new PDFImage(fileName, {
+    convertOptions: {
+      '-background': 'white',
+      '-alpha': 'remove',
+      '-density': '300',
+      '-quality': '100'
+    }
+  })
+  
+  const [pathToPng] = await pdfImage.convertFile()
+  return pathToPng
+}
+
 async function main () {
   const today = new Date()
 
-  console.log('🏁 starting browser...')
+  log('🏁 starting browser...')
   const lunchLink = await getLunchLink(today)
 
-  console.log('⬇️ getting pdf file from link...')
+  log('⬇️ getting pdf file from link...')
   const menuFileBuffer = await getFileBufferFromLink(lunchLink)
 
-  console.log('💅 extracting page from pdf...')
+  log('💅 extracting page from pdf...')
   const singlePageMenuFileBuffer = await extractPageFromPdf(menuFileBuffer, getPageNumber(today))
 
-  console.log('🗄 saving file...')
-  const fileName = `${today.toISOString().split('T')[0]}-menu.pdf`
-  fs.writeFileSync(fileName, singlePageMenuFileBuffer)
+  log('🗄 saving file...')
+  const pdfFileName = `${today.toISOString().split('T')[0]}-menu.pdf`
+  fs.writeFileSync(pdfFileName, singlePageMenuFileBuffer)
 
-  console.log('⬆️ uploading file to slack...')
-  await uploadFileToSlack(fileName)
-  console.log('🎉 file successfully uploaded')
+  let fileToBeUploadedToSlack = pdfFileName
+  if (process.env.SHOULD_CONVERT_TO_IMAGE) {
+    log('📸 converting pdf to png...')
+    fileToBeUploadedToSlack = await convertPdfToPng(pdfFileName)
+  }
 
-  console.log('❌ removing file...')
-  fs.rmSync(fileName)
+  log('⬆️ uploading file to slack...')
+  await uploadFileToSlack(fileToBeUploadedToSlack)
+  log('🎉 file successfully uploaded')
+
+  log('❌ removing file(s)...')
+  fs.rmSync(pdfFileName)
+  if (process.env.SHOULD_CONVERT_TO_IMAGE) fs.rmSync(fileToBeUploadedToSlack)
 
   process.exit(0)
 }
