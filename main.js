@@ -1,29 +1,31 @@
 require('dotenv').config()
 const weekDays = require('i18n-week-days')
 const axios = require('axios')
-const FormData = require('form-data')
+const { WebClient } = require('@slack/web-api')
 const { PDFDocument } = require('pdf-lib')
 const { PDFImage } = require('pdf-image')
 const cheerio = require('cheerio')
 const fs = require('fs')
 
-const SLACK_FILE_UPLOAD_URL = 'https://slack.com/api/files.upload'
 const NOON_CPH_MENU_LINK = 'https://www.nooncph.dk/ugens-menuer'
+const web = new WebClient(process.env.SLACK_TOKEN)
 
 function log (message) {
   console.log(`[${new Date().toISOString()}] ${message}`)
 }
 
-function getPageNumber (date) {
+function getPageNumbers (date) {
   const weekDayInHumanFormat = date.toLocaleString('en-us', {  weekday: 'long' }).toLowerCase()
   const isFullNoon = process.env.FULL_NOON_DAYS.split(',').includes(weekDayInHumanFormat)
-  const isGreenNoon = !isFullNoon
+  const isGreenNoon = process.env.GREEN_NOON_DAYS.split(',').includes(weekDayInHumanFormat)
   const isDanishLanguageSpecified = process.env.LANGUAGE === 'da'
 
-  if (isGreenNoon && isDanishLanguageSpecified) return 0
-  if (isGreenNoon && !isDanishLanguageSpecified) return 1
-  if (isFullNoon && isDanishLanguageSpecified) return 2
-  if (isFullNoon && !isDanishLanguageSpecified) return 3
+  const result = []
+  if (isGreenNoon && isDanishLanguageSpecified) result.push(0)
+  if (isGreenNoon && !isDanishLanguageSpecified) result.push(1)
+  if (isFullNoon && isDanishLanguageSpecified) result.push(2)
+  if (isFullNoon && !isDanishLanguageSpecified) result.push(3)
+  return result
 }
 
 function getWeekNumber (date) {
@@ -38,22 +40,32 @@ function getDanishWeekDay (date) {
 
 async function getLunchLink (date) {
   const weekNumber = getWeekNumber(date)
-  const danishWeekDay = getDanishWeekDay(date)
-  const weekNumberMatcher = `_U${weekNumber}`
+  const danishWeekDay = getDanishWeekDay(date).substring(0, 3)
+  const weekNumberMatcher = `_u${weekNumber}`
   
   const { data } = await axios.get(NOON_CPH_MENU_LINK)
   const $ = cheerio.load(data)
   const linkCollection = $('a').map((_, linkElement) => $(linkElement).attr('href')).get()
-  const [lunchLink] = linkCollection.filter(link => link.includes(weekNumberMatcher) && link.includes(danishWeekDay))
+  const [lunchLink] = linkCollection.filter(link => {
+    const matchedAllLowerCase = link.includes(weekNumberMatcher) && link.includes(danishWeekDay)
+    const matchedDayLowerCase = link.includes(weekNumberMatcher.toUpperCase()) && link.includes(danishWeekDay)
+    const matchedWeekLowerCase = link.includes(weekNumberMatcher) && link.includes(danishWeekDay.toUpperCase())
+    const matchedAllUpperCase = link.includes(weekNumberMatcher.toUpperCase()) && link.includes(danishWeekDay.toUpperCase())
+    return matchedAllLowerCase || matchedDayLowerCase || matchedWeekLowerCase || matchedAllUpperCase
+  })
+
+  if (!lunchLink) throw new Error(`Could not find lunch link for ${danishWeekDay} week ${weekNumber}:${linkCollection.join('\n')}`)
 
   return lunchLink
 }
 
-async function extractPageFromPdf (pdfFileBuffer, pageNumber) {
+async function extractPagesFromPdf (pdfFileBuffer, pageNumbers) {
   const pdfDoc = await PDFDocument.load(pdfFileBuffer)
   const subDocument = await PDFDocument.create()
-  const [copiedPage] = await subDocument.copyPages(pdfDoc, [pageNumber])
-  subDocument.addPage(copiedPage)
+  const copiedPages = await subDocument.copyPages(pdfDoc, pageNumbers)
+  for (const page of copiedPages) {
+    await subDocument.addPage(page)
+  }
   const pdfBytes = await subDocument.save()
   return pdfBytes
 }
@@ -63,23 +75,20 @@ async function getFileBufferFromLink (lunchLink) {
   return fileBuffer.data
 }
 
-async function uploadFileToSlack (fileName) {
-  const form = new FormData()
-  form.append('channels', process.env.SLACK_CHANNEL_ID)
-  form.append('title', fileName)
-  form.append('filetype', 'auto')
-  form.append('file', fs.createReadStream(fileName))
+async function uploadFileToSlack (filename) {
+  const { file: { permalink } } = await web.files.upload({
+    filename,
+    file: fs.createReadStream(filename)
+  })
+  return permalink
+}
 
-  await axios.post(
-    SLACK_FILE_UPLOAD_URL,
-    form,
-    {
-      headers: {
-        'Authorization': `Bearer ${process.env.SLACK_TOKEN}`,
-        'Content-Type': 'multipart/form-data'
-      }
-    }
-  )
+async function sendMessageToSlack (message) {
+  const result = await web.chat.postMessage({
+    text: message,
+    channel: process.env.SLACK_CHANNEL_ID
+  })
+  return result
 }
 
 async function convertPdfToPng (fileName) {
@@ -92,8 +101,8 @@ async function convertPdfToPng (fileName) {
     }
   })
   
-  const [pathToPng] = await pdfImage.convertFile()
-  return pathToPng
+  const pathToPngs = await pdfImage.convertFile()
+  return pathToPngs
 }
 
 async function main () {
@@ -105,28 +114,34 @@ async function main () {
   log('⬇️ getting pdf file from link...')
   const menuFileBuffer = await getFileBufferFromLink(lunchLink)
 
-  log('💅 extracting page from pdf...')
-  const singlePageMenuFileBuffer = await extractPageFromPdf(menuFileBuffer, getPageNumber(today))
+  log('💅 extracting page(s) from pdf...')
+  const extractedMenuFileBuffer = await extractPagesFromPdf(menuFileBuffer, getPageNumbers(today))
 
-  log('🗄 saving file...')
+  log('🗄 saving file(s)...')
   const pdfFileName = `${today.toISOString().split('T')[0]}-menu.pdf`
-  fs.writeFileSync(pdfFileName, singlePageMenuFileBuffer)
+  fs.writeFileSync(pdfFileName, extractedMenuFileBuffer)
 
-  let fileToBeUploadedToSlack = pdfFileName
+  let filesToBeUploadedToSlack = [pdfFileName]
   if (process.env.SHOULD_CONVERT_TO_IMAGE) {
-    log('📸 converting pdf to png...')
-    fileToBeUploadedToSlack = await convertPdfToPng(pdfFileName)
+    log('📸 converting pdf to png(s)...')
+    const pathToPngs = await convertPdfToPng(pdfFileName)
+    filesToBeUploadedToSlack = pathToPngs
   }
 
-  log('⬆️ uploading file to slack...')
-  await uploadFileToSlack(fileToBeUploadedToSlack)
-  log('🎉 file successfully uploaded')
+  log('⬆️ uploading file(s) to slack...')
+  const permalinks = await Promise.all([
+    ...filesToBeUploadedToSlack.map(fileName => uploadFileToSlack(fileName))
+  ])
+  log('🎉 file(s) successfully uploaded')
+
+  log('📝 creating message...')
+  const message = permalinks.map(permalink => `<${permalink}| >`).join('')
+  await sendMessageToSlack(message)
 
   log('❌ removing file(s)...')
-  fs.rmSync(pdfFileName)
-  if (process.env.SHOULD_CONVERT_TO_IMAGE) fs.rmSync(fileToBeUploadedToSlack)
-
-  process.exit(0)
+  await Promise.all(
+    [...new Set([pdfFileName, ...filesToBeUploadedToSlack])].map(fileName => fs.promises.rm(fileName))
+  )
 }
 
 main()

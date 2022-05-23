@@ -15,10 +15,11 @@ It should be fairly straight forward:
    ```
    SLACK_TOKEN=xoxb-12345-12345-12345
    SLACK_CHANNEL_ID=C12345
+   GREEN_NOON_DAYS=monday,tuesday,wednesday,thursday
    FULL_NOON_DAYS=monday,friday
    ```
 
-   Note that the `FULL_NOON_DAYS` variable is comma delimited and that the days are in English. It is assumed that all other days are Green Noon days. Also, you can specify getting the menu in Danish instead of English by setting `LANGUAGE=da` as well as set whether to upload a PNG instead of a PDF by setting `SHOULD_CONVERT_TO_IMAGE=true`.
+   Note that the `GREEN_NOON_DAYS` and `FULL_NOON_DAYS` variable is comma delimited and that the days are in English. Also, you can specify getting the menu in Danish instead of English by setting `LANGUAGE=da` as well as set whether to upload a PNG instead of a PDF by setting `SHOULD_CONVERT_TO_IMAGE=true`.
 
 4. Run `$ yarn start`, `$ npm run start`, or `$ node main.js`
 
