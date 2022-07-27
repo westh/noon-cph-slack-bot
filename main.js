@@ -47,11 +47,8 @@ async function getLunchLink (date) {
   const $ = cheerio.load(data)
   const linkCollection = $('a').map((_, linkElement) => $(linkElement).attr('href')).get()
   const [lunchLink] = linkCollection.filter(link => {
-    const matchedAllLowerCase = link.includes(weekNumberMatcher) && link.includes(danishWeekDay)
-    const matchedDayLowerCase = link.includes(weekNumberMatcher.toUpperCase()) && link.includes(danishWeekDay)
-    const matchedWeekLowerCase = link.includes(weekNumberMatcher) && link.includes(danishWeekDay.toUpperCase())
-    const matchedAllUpperCase = link.includes(weekNumberMatcher.toUpperCase()) && link.includes(danishWeekDay.toUpperCase())
-    return matchedAllLowerCase || matchedDayLowerCase || matchedWeekLowerCase || matchedAllUpperCase
+    const linkInAllLowerCase = link.toLowerCase()
+    return linkInAllLowerCase.includes(weekNumberMatcher) && linkInAllLowerCase.includes(danishWeekDay)
   })
 
   if (!lunchLink) throw new Error(`Could not find lunch link for ${danishWeekDay} week ${weekNumber}:${linkCollection.join('\n')}`)
